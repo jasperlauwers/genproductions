@@ -8,9 +8,10 @@ Based on Pietro's script
 
 import commands
 import fileinput
-import argparse
+# import argparse
 import sys
 import os
+from optparse import OptionParser
 
 TESTING = 0
 QUEUE = ''
@@ -18,7 +19,7 @@ QUEUE = ''
 rootfolder = os.getcwd()
 
 
-def runCommand(command, printIt = 0, doIt = 1, TESTING = 0) :
+def runCommand(command, printIt = False, doIt = 1, TESTING = 0) :
     if TESTING : 
         printIt = 1
         doIt = 0
@@ -41,6 +42,9 @@ def prepareJob(tag, i, folderName) :
 
     f.write('echo "Start of job on " `date`\n\n')
 
+    f.write('cd '+os.getcwd()+'\n\n')
+#    f.write('pwd \n\n')
+
     f.write('source /cvmfs/cms.cern.ch/cmsset_default.sh\n\n')
     f.write('eval `scramv1 runtime -sh`\n\n')
 
@@ -50,19 +54,30 @@ def prepareJob(tag, i, folderName) :
     f.write('export PATH=$FASTJET_BASE/bin/:$PATH \n')
 
     f.write('### Prepare environments for LHAPDF ### \n\n')
+    
+    f.write('LHAPDF6TOOLFILE=$CMSSW_BASE/config/toolbox/$SCRAM_ARCH/tools/available/lhapdf6.xml    \n')
+    f.write('if [ -e $LHAPDF6TOOLFILE ]; then    \n')
+    f.write('   export LHAPDF_BASE=`cat $LHAPDF6TOOLFILE | grep "<environment name=\\"LHAPDF6_BASE\\"" | cut -d \\" -f 4`    \n')
+    f.write('else    \n')
+    f.write('   export LHAPDF_BASE=`scram tool info lhapdf | grep LHAPDF_BASE | sed -e s%LHAPDF_BASE=%%`    \n')
+    f.write('fi    \n')
 
-    f.write('export LHAPDF_BASE=`scram tool info lhapdf | grep LHAPDF_BASE | sed -e s%LHAPDF_BASE=%%`    \n')
+    f.write('echo "LHAPDF_BASE is set to:" $LHAPDF_BASE \n')
     f.write('export PATH=$LHAPDF_BASE/bin/:$PATH \n')
-    f.write('export LHAPATH=`scram tool info lhapdf | grep LHAPATH | sed -e s%LHAPATH=%%`\n')
-
-    f.write('export LHAPDF6TOOLFILE=$CMSSW_BASE/config/toolbox/$SCRAM_ARCH/tools/available/lhapdf6.xml \n\n')
-
-    f.write('if [ -e $LHAPDF6TOOLFILE ]; then \n')
-    f.write('    export LHAPDF6_BASE=`grep LHAPDF6_BASE $CMSSW_BASE/config/toolbox/$SCRAM_ARCH/tools/available/lhapdf6.xml | head -1 | cut -d \\" -f 4 `\n')
-    f.write('    export LHAPDF_DATA_PATH=`$LHAPDF6_BASE/bin/lhapdf-config --datadir` \n')
-    f.write('fi \n\n')
+#    f.write('export LHAPATH=`scram tool info lhapdf | grep LHAPATH | sed -e s%LHAPATH=%%`\n')
+    f.write('export LHAPDF_DATA_PATH=`$LHAPDF_BASE/bin/lhapdf-config --datadir` \n')
+#    f.write('export LHAPDF6TOOLFILE=$CMSSW_BASE/config/toolbox/$SCRAM_ARCH/tools/available/lhapdf6.xml \n\n')
 #    f.write('cd ' + rootfolder + '/' + folderName + '\n')
-#    f.write('echo ' + str (i) + ' | ../pwhg_main > log_' + tag + '.log 2>&1' + '\n')
+    f.write ('cd -' + '\n')
+    f.write ('echo "I am here:"' + '\n')
+    f.write ('pwd' + '\n')
+    f.write ('cp -p ' + rootfolder + '/' + folderName + '/powheg.input ./' + '\n')
+    f.write ('cp -p ' + rootfolder + '/' + folderName + '/JHUGen.input ./' + '\n')
+    f.write ('cp -p ' + rootfolder + '/' + folderName + '/*.dat  ./' + '\n') 
+    f.write ('cp -p ' + rootfolder + '/' + folderName + '/pwhg_main  ./' + '\n') 
+
+
+    f.write('\n')
 
     f.close()
     return filename
@@ -86,7 +101,7 @@ def prepareJobForEvents (tag, i, folderName, EOSfolder) :
 
     f.write ('pwd' + '\n')
     f.write ('ls' + '\n')
-    f.write ('echo ' + str (i) + ' | ' + rootfolder + '/pwhg_main > log_' + tag + '.log 2>&1' + '\n')
+    f.write ('echo ' + str (i) + ' | ' + rootfolder + '/pwhg_main &> log_' + tag + '.log ' + '\n')
     f.write ('cp -p log_' + tag + '.log ' + rootfolder + '/' + folderName + '/. \n')
     #lhefilename = 'pwgevents-{:04d}.lhe'.format(i) 
 
@@ -100,20 +115,20 @@ def prepareJobForEvents (tag, i, folderName, EOSfolder) :
 # ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
 
-def runParallelXgrid(parstage, xgrid, folderName, nEvents, njobs, powInputName, jobtag, rndSeed) :
+def runParallelXgrid(parstage, xgrid, folderName, nEvents, njobs, powInputName, jobtag, rndSeed, process) :
     # parstage, xgrid are strings!
 
-    print 'running jobs for grid'
-    print folderName
+    print 'Running parallel jobs for grid'
+    #print folderName
 
     inputName = folderName + "/powheg.input"
 
-    sedcommand = 'sed -i "s/NEVENTS/' + nEvents + '/ ; s/SEED/'+rndSeed+'/ ; s/parallelstage.*/parallelstage '+parstage+'/ ; s/xgriditeration.*/xgriditeration '+xgrid+'/ ; s/fakevirt.*// " '+inputName
+    sedcommand = 'sed -i "s/NEVENTS/' + nEvents + '/ ; s/SEED/'+rndSeed+'/ ; s/.*parallelstage.*/parallelstage '+parstage+'/ ; s/.*xgriditeration.*/xgriditeration '+xgrid+'/ ; s/.*manyseeds.*/manyseeds 1/ ; s/fakevirt.*// " '+inputName
 
     #print sedcommand
     runCommand(sedcommand)
 
-    if(parstage == '1' and xgrid == '1') :
+    if(parstage == '1') :
         if not 'parallelstage' in open(inputName).read() :
             runCommand("echo \'\n\nparallelstage "+parstage+"\' >> "+inputName)
         if not 'xgriditeration' in open(inputName).read() :
@@ -125,6 +140,12 @@ def runParallelXgrid(parstage, xgrid, folderName, nEvents, njobs, powInputName, 
         if not 'fakevirt' in open(inputName).read() :
             runCommand("echo \'fakevirt 1\' >> "+inputName)
 
+        #if process == 'ttH' :
+        #    if not 'ncall2' in open(inputName).read() :
+        #        runCommand("echo \'ncall2 0\' >> "+inputName)
+        #    else :
+        #        runCommand("sed -i \'s/ncall2.*/ncall2 0/g\' "+inputName)
+
     #runCommand('cp -p powheg.input ' + folderName)
 
     runCommand('cp -p '+inputName+' '+inputName+'.'+parstage+'_'+str(xgrid))
@@ -135,27 +156,35 @@ def runParallelXgrid(parstage, xgrid, folderName, nEvents, njobs, powInputName, 
 
         filename = folderName+'/run_' + jobID + '.sh'
         f = open(filename, 'a')
-        f.write('echo ' + str (i) + ' | ./pwhg_main > run_' + jobID + '.log 2>&1' + '\n')
+        #f.write('cd '+rootfolder+'/'+folderName+'/ \n')
+        f.write('echo ' + str (i) + ' | ./pwhg_main &> run_' + jobID + '.log ' + '\n')
+        f.write('cp -p *.log ' + rootfolder + '/' + folderName + '/. \n')  
+        f.write('cp -p *.top ' + rootfolder + '/' + folderName + '/. \n')  
+        f.write('cp -p *.dat ' + rootfolder + '/' + folderName + '/. \n')  
+
         f.close()
+
+        os.system('chmod 755 '+filename)
 
         #runCommand('bsub -J ' + jobID + ' -u pippopluto -q ' + QUEUE + ' < ' + jobname, 1, TESTING == 0)
 
         if QUEUE == '':
             print 'Direct running... #'+str(i)+' \n'
-            os.system('cd '+folderName+';bash run_'+jobID+'.sh &')
+            #print 'cd '+rootfolder+'/'+folderName
+            os.system('cd '+rootfolder+'/'+folderName+';bash run_'+jobID+'.sh &')
         else:
             print 'Submitting to queue: '+QUEUE+' #'+str(i)+' \n'
-            runCommand ('bsub -J ' + jobID + ' -u $USER -q ' + QUEUE + ' ' + folderName + '/run_'+jobID+'.sh ', TESTING == 0)
+            runCommand ('bsub -J ' + jobID + ' -u $USER -q ' + QUEUE + ' '+rootfolder+'/'+folderName+'/run_'+jobID+'.sh ', TESTING == 0)
 
 
     #runCommand ('mv *.sh ' + folderName)
 
 
 # ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-def runSingleXgrid(parstage, xgrid, folderName, nEvents, powInputName, seed) :
+def runSingleXgrid(parstage, xgrid, folderName, nEvents, powInputName, seed, process, scriptName) :
 
-    print 'Running single job for Xgrid'
-    print folderName
+    print 'Running single job for grid'
+    #print folderName
 
     inputName = folderName + "/powheg.input"
 
@@ -165,57 +194,98 @@ def runSingleXgrid(parstage, xgrid, folderName, nEvents, powInputName, seed) :
 
     runCommand(sedcommand)
 
-    prepareJob('Xgrid', '', folderName)
+    #prepareJob('Xgrid', '', folderName)
 
     #runCommand('rm -f ' + folderName + '/run_Xgrid.sh')
     #runCommand('cp -p run_Xgrid.sh ' + folderName + '/.')
 
-    filename = folderName + '/run_Xgrid.sh'
+    #filename = folderName + '/run_Xgrid.sh'
+    filename = scriptName
 
     f = open(filename, 'a')
-    #f.write('./pwhg_main > run_Xgrid.log 2>&1' + '\n')
+    f.write('cd '+rootfolder+'/'+folderName+'/ \n')
+
+    f.write('export LD_LIBRARY_PATH=`pwd`/lib/:`pwd`/lib64/:${LD_LIBRARY_PATH} \n\n')
+    #f.write('echo $LD_LIBRARY_PATH \n')
+
+    f.write('sed -i "s/NEVENTS/'+nEvents+'/ ; s/SEED/'+seed+'/" powheg.input\n\n')
+
+    if process == 'W' :
+        if os.path.exists(powInputName) :
+            f.write('cp -p '+'/'.join(powInputName.split('/')[0:-1])+'/cteq6m . \n')   
+        else :
+            f.write('wget --quiet --no-check-certificate -N http://cms-project-generators.web.cern.ch/cms-project-generators/'+'/'.join(powInputName.split('/')[0:-1])+'/cteq6m \n')
+
+    if process == 'gg_H_MSSM' :
+        if os.path.exists(powInputName) :
+            f.write('cp -p '+'/'.join(powInputName.split('/')[0:-1])+'/powheg-fh.in . \n')
+        else :
+            f.write('wget --quiet --no-check-certificate -N http://cms-project-generators.web.cern.ch/cms-project-generators/'+'/'.join(powInputName.split('/')[0:-1])+'/powheg-fh.in \n')
+
+    if process == 'gg_H_2HDM' :
+        if os.path.exists(powInputName) :
+            f.write('cp -p '+'/'.join(powInputName.split('/')[0:-1])+'/br.a3_2HDM . \n')
+            f.write('cp -p '+'/'.join(powInputName.split('/')[0:-1])+'/br.l3_2HDM . \n')
+            f.write('cp -p '+'/'.join(powInputName.split('/')[0:-1])+'/br.h3_2HDM . \n')
+        else :
+            f.write('wget --quiet --no-check-certificate -N http://cms-project-generators.web.cern.ch/cms-project-generators/'+'/'.join(powInputName.split('/')[0:-1])+'/br.a3_2HDM \n')
+            f.write('wget --quiet --no-check-certificate -N http://cms-project-generators.web.cern.ch/cms-project-generators/'+'/'.join(powInputName.split('/')[0:-1])+'/br.h3_2HDM \n')
+            f.write('wget --quiet --no-check-certificate -N http://cms-project-generators.web.cern.ch/cms-project-generators/'+'/'.join(powInputName.split('/')[0:-1])+'/br.l3_2HDM \n')
+
+    if process == 'VBF_HJJJ' :
+        if os.path.exists(powInputName) :
+            f.write('cp -p '+'/'.join(powInputName.split('/')[0:-1])+'/vbfnlo.input . \n')
+        else :
+            f.write('wget --quiet --no-check-certificate -N http://cms-project-generators.web.cern.ch/cms-project-generators/'+'/'.join(powInputName.split('/')[0:-1])+'/vbfnlo.input \n')
+
+    m_ncall2 = 500000
+    if process == 'ttH' :
+        for line in open(inputName) :
+            if 'ncall2' in line :
+                m_ncall2 = line.split(" ")[2]
+                print "The original ncall2 is :", m_ncall2
+
+        f.write('sed -i "s/ncall2.*/ncall2 0/g" powheg.input \n')
+        f.write('sed -i "s/fakevirt.*/fakevirt 1  ! number of calls for computing the integral and finding upper bound/g" powheg.input \n')
+
     f.write('./pwhg_main \n')
 
-    f.write('echo "\nEnd of job on " `date` \n')
+    if process == 'ttH' :
+        f.write('sed -i "s/ncall2.*/ncall2 '+m_ncall2+'  ! number of calls for computing the integral and finding upper bound/g" powheg.input \n')
+        f.write('sed -i "s/fakevirt.*/fakevirt 0/g" powheg.input \n')
+        f.write('./pwhg_main \n')
+
+    f.write('echo "\\nEnd of job on " `date` "\\n" \n')
     f.close()
+
+    os.system('chmod 755 '+filename)
 
     #runCommand ('bsub -J ' + jobID + ' -u pippopluto -q ' + QUEUE + ' < ' + jobname, 1, TESTING == 0)
 
-    if QUEUE == '':
-        print 'Direct running... \n'
-        #runCommand ('cd ' + folderName + '/; bash run_Xgrid.sh', TESTING == 0)
-        os.system('cd '+folderName+';bash run_Xgrid.sh >& run_Xgrid.log &')
-        #print "Issue 'bash run_Xgrid.sh >& run_Xgrid.log &' to generate grid..."
-        
-    else:
-        print 'Submitting to queue: '+QUEUE+' \n'
-        runCommand ('bsub -J ' + jobID + ' -u $USER -q ' + QUEUE + ' ' + folderName + '/run_Xgrid.sh ', TESTING == 0)
-
-
-
-
 # ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-def runGetSource(parstage, xgrid, folderName, powInputName, process) :
+def runGetSource(parstage, xgrid, folderName, powInputName, process, tagName) :
     # parstage, xgrid are strings!
 
     print 'Getting and compiling POWHEG source...'
 
-    prepareJob('source', '', '.')
+    #prepareJob(tagName, '', '.')
 
-    filename = 'run_source.sh'
+    filename = './run_'+tagName+'.sh'
     f = open (filename, 'a')
 
     f.write('export name='+folderName+'\n\n')
-#    f.write('set process='+rootfolder+'\n\n')
+#    f.write('export process='+rootfolder+'\n\n')
     f.write('export cardInput='+powInputName+'\n\n')
     f.write('export process='+process+'\n\n')
+    f.write('export WORKDIR='+os.getcwd()+'\n\n')
     f.write(
 '''
 # Release to be used to define the environment and the compiler needed
 export RELEASE=${CMSSW_VERSION}
-export WORKDIR=`pwd`
-export jhugenversion="v5.2.5"
+export jhugenversion="v7.0.2"
 
+cd $WORKDIR
+pwd
 
 # initialize the CMS environment 
 
@@ -238,8 +308,13 @@ export PATH=`pwd`:${PATH}
 ## Get the input card
 #wget --no-check-certificate http://cms-project-generators.web.cern.ch/cms-project-generators/${cardinput} -O powheg.input  || cp -p ${cardinput} powheg.input || fail_exit "Failed to get powheg input card " ${card}
 
-cp -p ../${cardInput} powheg.input
-cp -p ../JHUGen.input JHUGen.input
+if [ -s ../${cardInput} ]; then
+  cp -p ../${cardInput} powheg.input
+fi
+
+if [ -s ../JHUGen.input ]; then
+  cp -p ../JHUGen.input JHUGen.input
+fi
 
 sed -i -e "s#--#-#g" powheg.input
 
@@ -254,20 +329,37 @@ jhugen=0
 if [[ -s ./JHUGen.input ]]; then
   jhugen=$(expr $jhugen + 1)
   echo "JHUGen activated!"
+  #for decay weights in H->WW and H->ZZ
+  wget https://github.com/hroskes/genproductions/raw/master/bin/JHUGen/Pdecay/PMWWdistribution.out 
+  wget https://github.com/hroskes/genproductions/raw/master/bin/JHUGen/Pdecay/PMZZdistribution.out 
+
 fi
 
 ### retrieve the powheg source tar ball
-export POWHEGSRC=powhegboxV2_Feb2015.tar.gz
+export POWHEGSRC=powhegboxV2_Sep2016.tar.gz 
 
 echo 'D/L POWHEG source...'
 
 if [ ! -f ${POWHEGSRC} ]; then
-  wget --no-check-certificate http://cms-project-generators.web.cern.ch/cms-project-generators/${SCRAM_ARCH}/powheg/V2.0/src/powhegboxV2_Feb2015.tar.gz || fail_exit "Failed to get powheg tar ball "
+  wget --no-check-certificate http://cms-project-generators.web.cern.ch/cms-project-generators/slc6_amd64_gcc481/powheg/V2.0/src/${POWHEGSRC} || fail_exit "Failed to get powheg tar ball "
 fi
 
 tar zxf ${POWHEGSRC}
 #
+# increase maxseeds to 10000
+sed -i -e "s#par_maxseeds=200,#par_maxseeds=10000,#g" POWHEG-BOX/include/pwhg_par.h
+
+if [ -e POWHEG-BOX/${process}.tgz ]; then
+  cd POWHEG-BOX/
+  tar zxf ${process}.tgz
+  cd -
+fi
+
 patch -l -p0 -i ${WORKDIR}/patches/pdfweights.patch
+patch -l -p0 -i ${WORKDIR}/patches/pwhg_lhepdf.patch
+
+echo ${POWHEGSRC} > VERSION
+
 cd POWHEG-BOX/${process}
 
 # This is just to please gcc 4.8.1
@@ -280,20 +372,39 @@ sed -i -e "s#PDF[ \t]*=[ \t]*native#PDF=lhapdf#g" Makefile
 # Use gfortran, not other compilers which are not free/licensed
 sed -i -e "s#COMPILER[ \t]*=[ \t]*ifort#COMPILER=gfortran#g" Makefile
 
+# hardcode svn info
+sed -i -e 's#^pwhg_main:#$(shell ../svnversion/svnversion.sh>/dev/null) \
+\
+pwhg_main:#g' Makefile
+
+echo "pwhg_main.o: svn.version" >> Makefile
+echo "lhefwrite.o: svn.version" >> Makefile
+
 # Find proper histo booking routine (two of them exist)
 BOOK_HISTO="pwhg_bookhist-multi.o"
-if [ `echo ${name} | cut -d "_" -f 1` = "powhegboxV1" ]; then
+if [ `echo ${POWHEGSRC} | cut -d "_" -f 1` = "powhegboxV1" ]; then
    BOOK_HISTO="pwhg_bookhist.o"
 fi 
 if [ "$process" = "trijet" ]; then 
    BOOK_HISTO+=" observables.o"
+   rm -rf ../progress/bbinit.f
 fi  
 if [ "$process" = "VBF_HJJJ" ]; then 
   sed -i 's/..\/pwhg_book.h/pwhg_book.h/g' pwhg_analysis-dummy.f
 fi  
 if [ "$process" = "VBF_H" ]; then 
   sed -i '/pwhginihist/d' pwhg_analysis-dummy.f 
+  patch -l -p0 -i ${WORKDIR}/patches/vbf_h_init_couplings.patch
 fi  
+if [ "$process" = "VBF_Z_Z" ]; then 
+  patch -l -p0 -i ${WORKDIR}/patches/vbf_z_z_init_couplings.patch
+fi  
+if [ "$process" = "Wgamma" ] || [ "$process" = "W_ew-BMNNP" ]; then
+    patch -l -p0 -i ${WORKDIR}/patches/pwhg_analysis_driver.patch 
+fi
+if [ "$process" = "ttb_NLO_dec" ]; then
+    patch -l -p0 -i ${WORKDIR}/patches/pwhg_analysis_driver_offshellmap.patch
+fi
 
 # Remove ANY kind of analysis with parton shower
 if [ `grep particle_identif pwhg_analysis-dummy.f` = ""]; then
@@ -319,9 +430,13 @@ if [ "$process" = "gg_H_MSSM" ]; then
   cp -p ../gg_H_quark-mass-effects/SLHADefs.h .
 fi  
   
-echo "ANALYSIS=none 
-PWHGANAL=$BOOK_HISTO pwhg_analysis-dummy.o
-LHAPDF_CONFIG=${LHAPDF6_BASE}/bin/lhapdf-config" >> tmpfile
+echo "ANALYSIS=none " >> tmpfile
+if [ "$process" = "Wgamma" ]; then
+  echo "PWHGANAL=$BOOK_HISTO pwhg_analysis-dummy.o uti.o " >> tmpfile
+else
+  echo "PWHGANAL=$BOOK_HISTO pwhg_analysis-dummy.o " >> tmpfile
+fi
+echo "LHAPDF_CONFIG=${LHAPDF_BASE}/bin/lhapdf-config" >> tmpfile
 mv Makefile Makefile.interm
 cat tmpfile Makefile.interm > Makefile
 rm -f Makefile.interm tmpfile
@@ -333,10 +448,16 @@ if [ $jhugen = 1 ]; then
     wget --no-check-certificate http://cms-project-generators.web.cern.ch/cms-project-generators/slc6_amd64_gcc481/JHUGenerator.${jhugenversion}.tar.gz || fail_exit "Failed to get JHUGen tar ball "
   fi
 
-  tar xzf JHUGenerator.${jhugenversion}.tar.gz
+  tar zxf JHUGenerator.${jhugenversion}.tar.gz
   cd JHUGenerator
   sed -i -e "s#Comp = ifort#Comp = gfort#g" makefile
   make
+
+  mkdir -p ${WORKDIR}/${name}
+  cp -p JHUGen ${WORKDIR}/${name}/.
+  cp -pr pdfs ${WORKDIR}/${name}/.
+
+
   cd ..
 fi
 if [ "$process" = "gg_H_2HDM" ] || [ "$process" = "gg_H_MSSM" ]; then
@@ -367,28 +488,112 @@ if [ "$process" = "gg_H_2HDM" ] || [ "$process" = "gg_H_MSSM" ]; then
 fi  
 
 echo 'Compiling pwhg_main...'
+pwd
+if [ "$process" = "HJ" ]; then
+  echo "fixing q2min determination for HJ"
+  # avoid accessing member 1 for q2min determination. Use member 0, as member 1 may not be available
+  sed -i "s/getq2min(1,tmp)/getq2min(0,tmp)/g" setlocalscales.f
+fi  
+
 
 make pwhg_main || fail_exit "Failed to compile pwhg_main"
 
 mkdir -p ${WORKDIR}/${name}
 cp -p pwhg_main ${WORKDIR}/${name}/.
+
+if [ -d ./lib ]; then
+  cp -a ./lib ${WORKDIR}/${name}/.
+fi 
+if [ -d ./lib64 ]; then
+  cp -a ./lib64 ${WORKDIR}/${name}/.
+fi
+
 cd ${WORKDIR}/${name}
+
+if [ "$process" = "HJ" ]; then
+  echo "Compilinig HNNLO...."
+  wget http://theory.fi.infn.it/grazzini/codes/hnnlo-v2.0.tgz
+  tar -xzvf hnnlo-v2.0.tgz
+  cd hnnlo-v2.0
+  cp ../POWHEG-BOX/HJ/NNLOPS-mass-effects/HNNLO-makefile ./makefile 
+  cp -r ../POWHEG-BOX/HJ/NNLOPS-mass-effects/HNNLO-patches ./
+  cat makefile | sed -e "s#LHAPDFLIB=.\+#LHAPDFLIB=$(scram tool info lhapdf | grep LIBDIR | cut -d "=" -f2)#g" > makefile
+  make || fail_exit "Failed to compile HNNLO"
+  cp -p bin/hnnlo ${WORKDIR}/${name}/
+  cp bin/br.* ${WORKDIR}/${name}/
+  cd ${WORKDIR}/${name}
+  cp POWHEG-BOX/HJ/NNLOPS-mass-effects/mergedata.f .
+  gfortran -o mergedata mergedata.f
+
+  cd ${WORKDIR}/${name}/POWHEG-BOX/HJ
+ 
+  cp Makefile Makefile.orig
+  cat Makefile.orig | sed -e "s#ANALYSIS=.\+#ANALYSIS=NNLOPS#g" |sed -e "s#\$(shell \$(LHAPDF_CONFIG) --libdir)#$(scram tool info lhapdf | grep LIBDIR | cut -d "=" -f2)#g" | sed -e "s#FASTJET_CONFIG=.\+#FASTJET_CONFIG=$(scram tool info fastjet | grep BASE | cut -d "=" -f2)/bin/fastjet-config#g" | sed -e "s#NNLOPSREWEIGHTER+=  fastjetfortran.o#NNLOPSREWEIGHTER+=  fastjetfortran.o pwhg_bookhist-multi.o#g" > Makefile
+  make nnlopsreweighter || fail_exit "Failed to compile nnlopsreweighter"
+  cp nnlopsreweighter ../../
+  cd ${WORKDIR}/${name}
+  HMASS=`cat powheg.input | grep "^hmass" | cut -d " " -f2`; 
+  gawk "/sroot/{gsub(/8000/,13000)};/hmass/{gsub(/125.5/, ${HMASS})};/mur,muf/{gsub(/62.750/, $(( $HMASS/2 )))};{print}" POWHEG-BOX/HJ/PaperRun/HNNLO-LHC8-R04-APX2-11.input | sed -e "s#10103#SEED#g" | sed -e "s#HNNLO-LHC8-R04-APX2-11#HNNLO-LHC13-R04-APX2-11#g"> HNNLO-LHC13-R04-APX2-11.input
+  gawk "/sroot/{gsub(/8000/,13000)};/hmass/{gsub(/125.5/, ${HMASS})};/mur,muf/{gsub(/62.750/, $(( $HMASS )))};{print}" POWHEG-BOX/HJ/PaperRun/HNNLO-LHC8-R04-APX2-11.input | sed -e "s#10103#SEED#g" | sed -e "s#HNNLO-LHC8-R04-APX2-11#HNNLO-LHC13-R04-APX2-22#g"> HNNLO-LHC13-R04-APX2-22.input
+  gawk "/sroot/{gsub(/8000/,13000)};/hmass/{gsub(/125.5/, ${HMASS})};/mur,muf/{gsub(/62.750/, $(( $HMASS/4 )))};{print}" POWHEG-BOX/HJ/PaperRun/HNNLO-LHC8-R04-APX2-11.input | sed -e "s#10103#SEED#g" | sed -e "s#HNNLO-LHC8-R04-APX2-11#HNNLO-LHC13-R04-APX2-0505#g"> HNNLO-LHC13-R04-APX2-0505.input
+  cat << EOF > nnlopsreweighter.input
+# a line beginning with 'lhfile' followed by the name of the event file
+
+lhfile pwgevents.lhe 
+
+# weights present in the lhfile: 'mtinf', 'mt', 'mtmb', 'mtmb-bminlo'
+
+
+# a line with: 'nnlofiles'
+# followed by a quoted label and the name of a HNNLO output file.
+# In the following the 3 ouput refer to mt=infinity approx,
+# finite mt, and finite mt and mb.
+
+nnlofiles
+'nn-mtmb-11' HNNLO-11.top
+'nn-mtmb-22' HNNLO-22.top
+'nn-mtmb-0505' HNNLO-0505.top
+
+# The new desired weights, in the Les Houches format.
+# The user can choose to group them in the way he prefers, and give them
+# the id's he likes.
+# The program determined how to compute each weights from the description
+# line. It loops through the weights id's present in the pwgevents.lhe file
+# and through the labels of the nnlofiles. If a label of a weight and
+# a label of the nnlofiles are both present in the description field
+# of a weight mentioned here, it computes that weight by reweighting
+# the corresponding weights in the lhe file with the nnlo result present
+# in the nnlofiles associated with the label. For example, in the
+# nnlops-mt id in the following it reweights the nn-mtinf weight present
+# in the .lhe file with the nnlo result present in the
+# HNNLO-LHC8-R04-APX0-11.top file.
+
+<initrwgt>
+<weightgroup name='nnl'> 
+<weight id='nnlops-11'> combines 'nn-mtmb-11' with 'c' (central)</weight> 
+<weight id='nnlops-22'> combines 'nn-mtmb-22' with 'c' (central)</weight> 
+<weight id='nnlops-0505'> combines 'nn-mtmb-0505' with 'c' (central)</weight> 
+</weightgroup>
+</initrwgt>
+EOF
+
+fi  
 
 #mkdir -p workdir
 #cd workdir
 localDir=`pwd`
 
 # Copy additional files
-if [ -e  ${WORKDIR}/vbfnlo.input ]; then
+if [ -e ${WORKDIR}/vbfnlo.input ]; then
   cp -p ${WORKDIR}/vbfnlo.input .
 fi 
 if [ -e ${WORKDIR}/br.a3_2HDM ]; then
   cp -p ${WORKDIR}/br*2HDM .
 fi
-if [ -e  ${WORKDIR}/powheg-fh.in ]; then
+if [ -e ${WORKDIR}/powheg-fh.in ]; then
   cp -p ${WORKDIR}/powheg-fh.in .
 fi
-if [ -e  ${WORKDIR}/cteq6m ]; then
+if [ -e ${WORKDIR}/cteq6m ]; then
     cp -p ${WORKDIR}/cteq6m .
 fi 
 
@@ -405,7 +610,7 @@ fi
 #export LHAPDF_DATA_PATH=`${myDir}/lhapdf-config --datadir`
 #../pwhg_main &> log_${process}_${seed}.txt
 
-cp -p ../runcms*.sh .
+#cp -p ../runcms*.sh .
 
 cd ${WORKDIR}
 
@@ -413,12 +618,13 @@ echo 'Compiling finished...'
 
 if [ $jhugen = 1 ]; then
   cp -p ${cardj} .
-  if [ ! -e  ${WORKDIR}/runcmsgrid_powhegjhugen.sh ]; then
+  
+  if [ ! -e ${WORKDIR}/runcmsgrid_powhegjhugen.sh ]; then
    fail_exit "Did not find " ${WORKDIR}/runcmsgrid_powhegjhugen.sh 
   fi
   sed -e 's/PROCESS/'${process}'/g' ${WORKDIR}/runcmsgrid_powhegjhugen.sh > runcmsgrid.sh
 else
-  if [ ! -e  ${WORKDIR}/runcmsgrid_powheg.sh ]; then
+  if [ ! -e ${WORKDIR}/runcmsgrid_powheg.sh ]; then
    fail_exit "Did not find " ${WORKDIR}/runcmsgrid_powheg.sh 
   fi
   sed -e 's/PROCESS/'${process}'/g' ${WORKDIR}/runcmsgrid_powheg.sh > runcmsgrid.sh
@@ -430,16 +636,7 @@ chmod 755 runcmsgrid.sh
 
     f.close()
 
-    if QUEUE == '':
-        print 'Direct compiling... \n'
-        #runCommand ('bash run_source.sh ', TESTING == 1)
-        os.system('bash run_source.sh >& run_source.log &')
-        #print "Issue 'bash run_source.sh >& run.log &' to compile powheg..."
-        
-    else:
-        print 'Submitting to queue: '+QUEUE+' \n'
-        runCommand ('bsub -J ' + jobID + ' -u $USER -q ' + QUEUE + ' run_source.sh ', TESTING == 0)
-
+    os.system('chmod 755 '+filename)
 
     #print "Source done..."
     #runCommand ('mv *.sh ' + folderName)
@@ -451,9 +648,10 @@ chmod 755 runcmsgrid.sh
 # ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
 
-def runEvents(parstage, folderName, EOSfolder, njobs, powInputName, jobtag) :
+def runEvents(parstage, folderName, EOSfolder, njobs, powInputName, jobtag, process) :
     print 'run : submitting jobs'
     #runCommand('rm -f ' + folderName + 'powheg.input')
+
     sedcommand = 'sed -i "s/parallelstage.*/parallelstage ' + parstage + '/ ; s/xgriditeration.*/xgriditeration 1/" '+folderName+'/powheg.input'
 
     runCommand(sedcommand)
@@ -471,42 +669,178 @@ def runEvents(parstage, folderName, EOSfolder, njobs, powInputName, jobtag) :
 
         filename = folderName+'/run_' + tag + '.sh'
         f = open (filename, 'a')
-        f.write('echo ' + str (i) + ' | ./pwhg_main > run_' + tag + '.log 2>&1' + '\n')
+        f.write('cd '+rootfolder+'/'+folderName+'/ \n')
+        f.write('echo ' + str (i) + ' | ./pwhg_main &> run_' + tag + '.log ' + '\n')
         f.close()
 
+        os.system('chmod 755 '+filename)
 
         if QUEUE == '':
             print 'Direct running... #'+str(i)+' \n'
-            os.system('cd '+folderName+';bash run_'+tag+'.sh &')
+            os.system('cd '+rootfolder+'/'+folderName+';bash run_'+tag+'.sh &')
 
         else:
             print 'Submitting to queue: '+QUEUE+' #'+str(i)+' \n'
-            runCommand ('cd '+folderName+';bsub -J ' + jobID + ' -u $USER -q ' + QUEUE + ' ' + folderName + '/run_'+tag+'.sh', TESTING == 0)
+            runCommand ('bsub -J ' + jobID + ' -u $USER -q ' + QUEUE + ' ' + rootfolder +'/'+folderName+'/run_'+tag+'.sh', TESTING == 0)
 
     #runCommand('mv *.sh ' + folderName)
 
 
 # ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
-def createTarBall(parstage, folderName, prcName, keepTop) :
-    print 'Creating tarball distribution for ' + args.folderName + '_' + prcName
+def createTarBall(parstage, folderName, prcName, keepTop, seed, scriptName) :
+    print 'Creating tarball distribution for '+args.folderName+'_'+prcName+'.tgz'
     print
 
-    runCommand('cd ' + rootfolder)
-    runCommand('rm -rf ' + folderName + '_' + prcName + '.tgz')
+    #inputName = folderName + "/powheg.input"
 
-    runCommand('cp -p ' + rootfolder + '/run_pwg.py ' + rootfolder + '/' + folderName + '/.')
-    runCommand('cp -p ' + rootfolder + '/runcmsgrid*.sh ' + rootfolder + '/' + folderName + '/.')
+    filename = scriptName
 
-    if keepTop == '1' :
-      print 'Keeping validation plots.'
-      print
-      runCommand('tar zcvf ' + rootfolder + '/' + folderName + '_' + prcName + '.tgz ' + folderName +' --exclude=POWHEG-BOX --exclude=powhegbox*.tar.gz --exclude=*.lhe --exclude=run_*.sh --exclude=*.log --exclude=*temp', printIt = 1)
-    else :
-      runCommand('tar zcvf ' + rootfolder + '/' + folderName + '_' + prcName + '.tgz ' + folderName +' --exclude=POWHEG-BOX --exclude=powhegbox*.tar.gz --exclude=*.top --exclude=*.lhe --exclude=run_*.sh --exclude=*.log --exclude=*temp', printIt = 1)
+    f = open(filename, 'a')
+    #if filename = "" :
+    #    f = subprocess.Popen(['/bin/sh', '-c'])
 
-    print
-    print 'Done.'
+    f.write('export folderName='+folderName+'\n\n')
+    f.write('export process='+prcName+'\n\n')
+#    f.write('export cardInput='+powInputName+'\n\n')
+    f.write('export keepTop='+keepTop+'\n\n')
+    f.write('export WORKDIR='+os.getcwd()+'\n\n')
+    f.write('export SEED='+seed+'\n\n')
+    f.write(
+'''
+
+cd $WORKDIR/$folderName
+echo "Processing folder: "
+pwd
+
+rm -f $WORKDIR/$folderName'_'$process'.tgz'
+
+cp -p $WORKDIR/run_pwg.py $WORKDIR/$folderName
+
+if [ -e $WORKDIR/$folderName/pwggrid-0001.dat ]; then
+  cp -p $WORKDIR/$folderName/pwggrid-0001.dat $WORKDIR/$folderName/pwggrid.dat
+  cp -p $WORKDIR/$folderName/pwg-0001-stat.dat $WORKDIR/$folderName/pwg-stat.dat
+fi
+
+grep -q "NEVENTS" powheg.input; test $? -eq 0 || sed -i "s/^numevts.*/numevts NEVENTS/g" powheg.input
+grep -q "SEED" powheg.input; test $? -eq 0 || sed -i "s/^iseed.*/iseed SEED/g" powheg.input
+
+grep -q "manyseeds" powheg.input; test $? -eq 0 || printf "\\n\\nmanyseeds 1\\n" >> powheg.input
+grep -q "parallelstage" powheg.input; test $? -eq 0 || printf "\\nparallelstage 4\\n" >> powheg.input
+grep -q "xgriditeration" powheg.input; test $? -eq 0 || printf "\\nxgriditeration 1\\n" >> powheg.input
+
+# turn into single run mode
+sed -i "s/^manyseeds.*/#manyseeds 1/g" powheg.input
+sed -i "s/^parallelstage.*/#parallelstage 4/g" powheg.input
+sed -i "s/^xgriditeration/#xgriditeration 1/g" powheg.input
+
+if [ -e ${WORKDIR}/$folderName/cteq6m ]; then
+    cp -p ${WORKDIR}/cteq6m .
+fi
+
+if [ -e ${WORKDIR}/$folderName/JHUGen.input ]; then
+    sed -e "s/PROCESS/${process}/g" ${WORKDIR}/runcmsgrid_powhegjhugen.sh > runcmsgrid.sh
+else
+    sed -e "s/PROCESS/${process}/g" ${WORKDIR}/runcmsgrid_powheg.sh > runcmsgrid.sh
+fi
+
+sed -i 's/pwggrid.dat ]]/pwggrid.dat ]] || [ -e ${WORKDIR}\/pwggrid-0001.dat ]/g' runcmsgrid.sh
+
+if [ "$process" = "HJ" ]; then
+  cat runcmsgrid.sh  | gawk '/produceWeightsNNLO/{gsub(/false/, \"true\")};{print}' > runcmsgrid_tmp.sh
+  mv runcmsgrid_tmp.sh runcmsgrid.sh
+fi  
+
+chmod 755 runcmsgrid.sh
+cp -p runcmsgrid.sh runcmsgrid_par.sh
+
+sed -i '/ reweightlog_/c cat <<EOF | ../pwhg_main &>> reweightlog_${process}_${seed}.txt\\n${seed}\\npwgevents.lhe\\nEOF\\n' runcmsgrid_par.sh
+sed -i 's/# Check if /sed -i \"s#.*manyseeds.*#manyseeds 1#g\" powheg.input\\n# Check if /g' runcmsgrid_par.sh
+sed -i 's/# Check if /sed -i \"s#.*parallelstage.*#parallelstage 4#g\" powheg.input\\n# Check if /g' runcmsgrid_par.sh
+sed -i 's/# Check if /sed -i \"s#.*xgriditeration.*#xgriditeration 1#g\" powheg.input\\n\\n# Check if /g' runcmsgrid_par.sh
+sed -i 's/# Check if /rm -rf pwgseeds.dat; for ii in $(seq 1 9999); do echo $ii >> pwgseeds.dat; done\\n\\n# Check if /g' runcmsgrid_par.sh
+sed -i 's/^..\/pwhg_main/echo \${seed} | ..\/pwhg_main/g' runcmsgrid_par.sh
+sed -i 's/\.lhe/\${idx}.lhe/g' runcmsgrid_par.sh
+sed -i 's/pwgevents.lhe/fornnlops/g' nnlopsreweighter.input
+sed -i "s/^process/idx=-\`echo \${seed} | awk \'{printf \\"%04d\\", \$1}\'\` \\nprocess/g" runcmsgrid_par.sh
+
+chmod 755 runcmsgrid_par.sh
+
+#cd ${WORKDIR}
+
+if [ "$process" = "HJ" ]; then
+  echo "This process needs NNLOPS reweighting"
+  for i in `echo 11 22 0505`; do
+    ./mergedata 1 ${i}/*.top
+    mv fort.12 HNNLO-${i}.top 
+  done
+  #force keep top in this case 
+  keepTop='1'
+fi
+
+if [ $keepTop == '1' ]; then
+    echo 'Keeping validation plots.'
+    echo 'Packing...' ${WORKDIR}'/'${folderName}'_'${process}'.tgz'
+    tar zcf ${WORKDIR}'/'${folderName}'_'${process}'.tgz' * --exclude=POWHEG-BOX --exclude=powhegbox*.tar.gz --exclude=*.lhe --exclude=run_*.sh --exclude=*.log --exclude=*temp
+else
+    echo 'Packing...' ${WORKDIR}'/'${folderName}'_'${process}'.tgz'
+    tar zcf ${WORKDIR}'/'${folderName}'_'${process}'.tgz' * --exclude=POWHEG-BOX --exclude=powhegbox*.tar.gz --exclude=*.top --exclude=*.lhe --exclude=run_*.sh --exclude=*.log --exclude=*temp
+fi
+
+cd ${WORKDIR}
+
+date
+echo 'Done.'
+
+''')
+
+    f.close()
+
+    os.system('chmod 755 '+filename)
+
+# ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+
+
+def runhnnlo(folderName, njobs, QUEUE):
+  scales = ["11", "22", "0505"]
+  for scale in scales:
+    os.system('rm -rf '+ folderName+"/"+scale)
+    os.system('mkdir -p '+ folderName+"/"+scale) 
+    filename = folderName+"/"+scale+"/launch_NNLO.sh"
+    launching_script = open(filename, "w")
+    launching_script.write("#!/bin/bash\n")
+    launching_script.write('base='+os.getcwd()+"/"+folderName+"/"+scale+'\n\n')
+    launching_script.write(
+'''
+config=$1
+seed=$2
+
+cd $base
+eval `scram runtime -sh`
+cd -
+
+cat $base/../$config | sed -e "s#SEED#$seed#g" > config.input
+
+cp $base/../hnnlo .
+cp $base/../br* .
+
+./hnnlo < config.input &> log_${seed}.txt
+
+cp HNNLO-LHC13* ${base}
+
+cp log_${seed}.txt ${base}
+''')
+    launching_script.close()
+    os.system('chmod 755 '+filename) 
+    for ijob in range(njobs):
+      config = "HNNLO-LHC13-R04-APX2-"+scale+".input" 
+      jobID = scale+"_"+str(ijob)
+      print 'Submitting to queue: '+QUEUE+' #'+str(ijob)+' \n'
+      runCommand ('bsub -J ' + jobID + ' -u $USER -q ' + QUEUE + ' \"' + rootfolder + "/" + folderName + "/"+ scale + '/launch_NNLO.sh '+config+' '+str(1000+ijob)+'\"', 1, 1)
+      
+      
+
+
 
 # ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
@@ -523,27 +857,32 @@ if __name__ == "__main__":
 #    inputTemplate = sys.argv[5] # FIXME build the template... it simply should be the cfg file
 #    eosFolderName = sys.argv[6]
     
-    parser = argparse.ArgumentParser (description = 'run phantom productions on lxplus')
-    parser.add_argument('-p', '--parstage'      , default= '0',            help='stage of the production process [0]')
-    parser.add_argument('-x', '--xgrid'         , default= '1',            help='loop number for the girds production [1]')
-    parser.add_argument('-f', '--folderName'    , default='testProd',      help='local folder and last eos folder name[testProd]')
-    parser.add_argument('-e', '--eosFolder'     , default='NONE' ,         help='folder before the last one, on EOS')
-    parser.add_argument('-t', '--totEvents'     , default= '10000',        help='total number of events to be generated [10000]')
-    parser.add_argument('-n', '--numEvents'     , default= '2000',         help='number of events for a single job [2000]')
-    parser.add_argument('-i', '--inputTemplate' , default= 'powheg.input', help='input cfg file (fixed) [=powheg.input]')
-    parser.add_argument('-q', '--lsfQueue'      , default= '',          help='LSF queue [2nd]')
-    parser.add_argument('-s', '--rndSeed'       , default= '42',           help='Starting random number seed [42]')
-    parser.add_argument('-m', '--prcName'       , default= 'DMGG',           help='POWHEG process name [DMGG]')
-    parser.add_argument('-k', '--keepTop'       , default= '0',           help='Keep the validation top draw plots [0]')
+    # parser = argparse.ArgumentParser (description = 'run phantom productions on lxplus')
+    parser = OptionParser()
+    parser.add_option('-p', '--parstage'      , dest="parstage",      default= '0',            help='stage of the production process [0]')
+    parser.add_option('-x', '--xgrid'         , dest="xgrid",         default= '1',            help='loop number for the girds production [1]')
+    parser.add_option('-f', '--folderName'    , dest="folderName",    default='testProd',      help='local folder and last eos folder name[testProd]')
+    parser.add_option('-e', '--eosFolder'     , dest="eosFolder",     default='NONE' ,         help='folder before the last one, on EOS')
+    parser.add_option('-j', '--numJobs'       , dest="numJobs",       default= '10',           help='number of jobs to be used for multicore grid step 1,2,3')
+    parser.add_option('-t', '--totEvents'     , dest="totEvents",     default= '10000',        help='total number of events to be generated [10000]')
+    parser.add_option('-n', '--numEvents'     , dest="numEvents",     default= '2000',         help='number of events for a single job [2000]')
+    parser.add_option('-i', '--inputTemplate' , dest="inputTemplate", default= 'powheg.input', help='input cfg file (fixed) [=powheg.input]')
+    parser.add_option('-g', '--inputJHUGen' , dest="inputJHUGen", default= '', help='input JHUGen cfg file []')
+    parser.add_option('-q', '--lsfQueue'      , dest="lsfQueue",      default= '',          help='LSF queue [2nd]')
+    parser.add_option('-s', '--rndSeed'       , dest="rndSeed",       default= '42',           help='Starting random number seed [42]')
+    parser.add_option('-m', '--prcName'       , dest="prcName",       default= 'DMGG',           help='POWHEG process name [DMGG]')
+    parser.add_option('-k', '--keepTop'       , dest="keepTop",       default= '0',           help='Keep the validation top draw plots [0]')
 
-    args = parser.parse_args ()
+    # args = parser.parse_args ()
+    (args, opts) = parser.parse_args(sys.argv)
     
     QUEUE = args.lsfQueue
     EOSfolder = args.folderName
 
     print
-    print 'RUNNING PARAMS: args.parstage = ' + args.parstage + ' , args.xgrid = ' + args.xgrid  + ' , args.folderName = ' + args.folderName 
-    print '                args.totEvents = ' + args.totEvents 
+    print 'RUNNING PARAMS: parstage = ' + args.parstage + ' , xgrid = ' + args.xgrid  + ' , folderName = ' + args.folderName 
+    print '                Total Events = ' + args.totEvents 
+    print '                Number of Events = ' + args.numEvents 
     print '                powheg input cfg file : ' + args.inputTemplate 
     print '                powheg process name : ' + args.prcName
     print '                working folder : ' + args.folderName
@@ -555,17 +894,49 @@ if __name__ == "__main__":
         print '  --- TESTNG, NO submissions will happen ---  '
         print
 
-    res = runCommand('ls ' + args.folderName)
-    if args.parstage == '1' and args.xgrid == '1' and res != 0 :
-        print 'Working folder ' + args.folderName + ' not existing, exiting...'
-        sys.exit (-1)
+    res = os.path.exists(rootfolder+'/'+args.folderName)
+
+    if args.parstage == '1' and args.xgrid == '1' and (not res) :
+        print 'Creating working folder ' + args.folderName + '...'
+        # Assuming the generator binaries are in the current folder.
+        os.system('mkdir '+rootfolder+'/'+args.folderName)
+        if os.path.exists(rootfolder+'/pwhg_main') :
+            print 'Copy pwhg_main'
+            os.system('cp -p pwhg_main '+args.folderName+'/.')
+
+        if os.path.exists(rootfolder+'JHUGen') :
+            print 'Copy JHUGen'
+            os.system('cp -p JHUGen '+args.folderName+'/.')
+
     if args.parstage == '1' and args.xgrid == '1' :
+        if not os.path.exists(args.folderName) :
+            print 'Creating working folder ' + args.folderName + '...'
+            # Assuming the generator binaries are in the current folder.
+            os.system('mkdir '+args.folderName)
+            if os.path.exists('pwhg_main') :
+                os.system('cp -p pwhg_main '+args.folderName+'/.')
+
+            if os.path.exists('JHUGen') :
+                os.system('cp -p JHUGen '+args.folderName+'/.')
+
+        if not os.path.exists(args.inputTemplate) :
+            os.system('wget --quiet --no-check-certificate -N http://cms-project-generators.web.cern.ch/cms-project-generators/'+args.inputTemplate+' -O '+args.folderName+'/powheg.input')
+            os.system('wget --quiet --no-check-certificate -N http://cms-project-generators.web.cern.ch/cms-project-generators/'+args.inputTemplate)
+
+            os.system('sed -i "s/^numevts.*/numevts '+args.numEvents+'/" '+
+                      args.folderName+'/powheg.input')
+
+        if not os.path.exists(args.folderName+'/powheg.input') :
+            os.system('cp -p '+args.inputTemplate+' '+
+                      args.folderName+'/powheg.input')
+            os.system('sed -i "s/^numevts.*/numevts '+args.numEvents+'/" '+
+                      args.folderName+'/powheg.input')
+
 #        runCommand ('mkdir ' + args.folderName)
 #        runCommand ('cp -p pwgseeds.dat ' + args.folderName)
-        res = runCommand('ls ' + args.folderName + '/pwgseeds.dat')
-        if res != 0 :
+        if not os.path.exists(args.folderName + '/pwgseeds.dat') :
             fseed = open(args.folderName + '/pwgseeds.dat', 'w')
-            for ii in range(1, 501) :
+            for ii in range(1, 10000) :
                 fseed.write(str(ii)+'\n')
 #        #FIXME this is a crude hardcoded trick to overcome some problems in LHAPDF usage
 #        runCommand ('ln -s /afs/cern.ch/user/g/govoni/work/HiggsPlusJets/lhapdf/share/lhapdf/PDFsets/CT10.LHgrid ./'  + args.folderName)
@@ -574,7 +945,7 @@ if __name__ == "__main__":
         runCommand (eoscmd + ' mkdir /eos/cms/store/user/${user}/LHE/powheg/' + args.eosFolder, 1, 1)
         runCommand (eoscmd + ' mkdir /eos/cms/store/user/${user}/LHE/powheg/' + args.eosFolder + '/' + EOSfolder, 1, 1)
 
-    njobs = int (args.totEvents) / int (args.numEvents)
+    njobs = int (args.numJobs)
 
     powInputName = args.inputTemplate
     #powInputName = args.inputTemplate + '_tempo'
@@ -583,24 +954,162 @@ if __name__ == "__main__":
 
     jobtag = args.parstage + '_' + args.xgrid
 
+    if len(sys.argv) <= 1 :
+        print "\t argument '-p', '--parstage'      , default= '0'"
+        print "\t argument '-x', '--xgrid'         , default= '1'"
+        print "\t argument '-f', '--folderName'    , default='testProd'"
+        print "\t argument '-e', '--eosFolder'     , default='NONE'"
+        print "\t argument '-t', '--totEvents'     , default= '10000"
+        print "\t argument '-n', '--numEvents'     , default= '2000'"
+        print "\t argument '-i', '--inputTemplate' , default= 'powheg.input'"
+        print "\t argument '-g', '--inputJHUGen'   , default= ''"
+        print "\t argument '-q', '--lsfQueue'      , default= ''"
+        print "\t argument '-s', '--rndSeed'       , default= '42'"
+        print "\t argument '-m', '--prcName'       , default= 'DMGG'"
+        print "\t argument '-k', '--keepTop'       , default= '0'"
+        print ""
+
+        exit()
+
+    if args.parstage == '0' or \
+       args.parstage == '0123' or args.parstage == 'a' or \
+       args.parstage == '01239' or args.parstage == 'one' or args.parstage == 'f' : # full single grid in oneshot 
+
+        tagName = 'src_'+args.folderName
+        filename = './run_'+tagName+'.sh'
+
+        prepareJob(tagName, '', '.')
+
+        if not os.path.exists(args.inputTemplate) :
+            os.system('wget --quiet --no-check-certificate -N http://cms-project-generators.web.cern.ch/cms-project-generators/'+args.inputTemplate)
+        os.system('mkdir -p '+rootfolder+'/'+args.folderName)
+        os.system('cp -p '+args.inputTemplate+' '+args.folderName+'/powheg.input')
+
+        os.system('rm -rf JHUGen.input')
+        inputJHUGen = '/'.join(powInputName.split('/')[0:-1])+'/JHUGen.input'
+        if not os.path.exists(inputJHUGen) :
+            os.system('wget --quiet --no-check-certificate -N http://cms-project-generators.web.cern.ch/cms-project-generators/'+inputJHUGen)
+            if os.path.exists('JHUGen.input') :
+                os.system('cp -p JHUGen.input '+args.folderName+'/.')
+            if os.path.exists(args.inputJHUGen) :
+                os.system('cp -p '+args.inputJHUGen+' '+args.folderName+'/JHUGen.input')
+        else :
+            os.system('cp -p '+inputJHUGen+' '+args.folderName+'/.')
+
     if args.parstage == '0' :
-        #runCommand('cp -p JHUGen.input '+args.folderName+'/.')
+
+        tagName = 'src_'+args.folderName
+        filename = './run_'+tagName+'.sh'
+
+        prepareJob(tagName, '', '.')
+
         runGetSource(args.parstage, args.xgrid, args.folderName,
-                     powInputName, args.prcName)
+                     powInputName, args.prcName, tagName)
+
+        if QUEUE == '':
+            print 'Direct compiling... \n'
+            #runCommand ('bash run_source.sh ', TESTING == 1)
+            os.system('bash '+filename+' 2>&1 | tee '+filename.split('.sh')[0]+'.log')
+            #print "Issue 'bash run_source.sh >& run.log &' to compile powheg..."
+        
+        else:
+            print 'Submitting to queue: '+QUEUE+' \n'
+            runCommand ('bsub -J compile_pwg -u $USER -q ' + QUEUE + ' '+rootfolder + '/' +filename, TESTING == 0)
+
     elif args.parstage == '1' :
         runParallelXgrid(args.parstage, args.xgrid, args.folderName,
                          args.numEvents, njobs, powInputName, jobtag,
-                         args.rndSeed)
-    elif args.parstage == '123' :
+                         args.rndSeed, args.prcName)
+
+    elif args.parstage == '123' or args.parstage == 's' : # single grid proc
+        tagName = 'grid_'+args.folderName
+        scriptName = args.folderName + '/run_'+tagName+'.sh'
+
+
+        os.system('cp -p '+args.inputTemplate+' '+args.folderName+'/powheg.input')
+        os.system('sed -i "s/^numevts.*/numevts '+args.totEvents+'/" '+
+                  args.folderName+'/powheg.input')
+
+        prepareJob(tagName, '', args.folderName)
         runSingleXgrid(args.parstage, args.xgrid, args.folderName,
-                       args.numEvents, powInputName, args.rndSeed)
-    elif args.parstage == '1239' :
+                       args.numEvents, powInputName, args.rndSeed,
+                       args.prcName, scriptName)
+
+        if QUEUE == '':
+            print 'Direct running single grid... \n'
+            #runCommand ('bash run_source.sh ', TESTING == 1)
+            os.system('bash '+scriptName+' >& '+scriptName.split('.sh')[0]+'.log &')
+            #print "Issue 'bash run_source.sh >& run.log &' to compile powheg..."
+        
+        else:
+            print 'Submitting to queue: '+QUEUE+' \n'
+            runCommand ('bsub -J '+args.folderName+' -u $USER -q ' + QUEUE + ' '+rootfolder+'/'+scriptName, TESTING == 0)
+
+    elif args.parstage == '0123' or args.parstage == 'a' : # compile & run
+        tagName = 'all_'+args.folderName
+        scriptName = './run_'+tagName+'.sh'
+
+        prepareJob(tagName, '', '.')
+        runGetSource(args.parstage, args.xgrid, args.folderName,
+                     powInputName, args.prcName, tagName)
+
+        os.system('sed -i "s/^numevts.*/numevts '+args.numEvents+'/" '+
+                  args.folderName+'/powheg.input')
         runSingleXgrid(args.parstage, args.xgrid, args.folderName,
-                       args.numEvents, powInputName, args.rndSeed)
-        createTarBall(args.parstage, args.folderName, args.prcName)
-    elif args.parstage == '9' :
+                       args.numEvents, powInputName, args.rndSeed,
+                       args.prcName, scriptName)
+
+        if QUEUE == '':
+            print 'Direct compiling and running... \n'
+            #runCommand ('bash run_source.sh ', TESTING == 1)
+            os.system('bash '+scriptName+' >& '+
+                      scriptName.split('.sh')[0]+'.log &')
+        else:
+            print 'Submitting to queue: '+QUEUE+' \n'
+            runCommand ('bsub -J all_'+args.folderName+' -u $USER -q ' +
+                        QUEUE + ' '+rootfolder + '/' +scriptName, TESTING == 0)
+
+    elif args.parstage == '01239' or args.parstage == 'one' or args.parstage == 'f' : # full single grid in oneshot 
+        tagName = 'full_'+args.folderName
+        scriptName = './run_'+tagName+'.sh'
+
+        prepareJob(tagName, '', '.')
+        runGetSource(args.parstage, args.xgrid, args.folderName,
+                     powInputName, args.prcName, tagName)
+
+        runSingleXgrid(args.parstage, args.xgrid, args.folderName,
+                       args.numEvents, powInputName, args.rndSeed,
+                       args.prcName, scriptName)
+
         createTarBall(args.parstage, args.folderName, args.prcName,
-                      args.keepTop)
+                      args.keepTop, args.rndSeed, scriptName)
+
+        if QUEUE == '':
+            print 'Direct running in one shot... \n'
+            #runCommand ('bash run_source.sh ', TESTING == 1)
+            os.system('bash '+scriptName+' >& '+
+                      scriptName.split('.sh')[0]+'.log &')
+        else:
+            print 'Submitting to queue: '+QUEUE+' \n'
+            runCommand ('bsub -J full_'+args.folderName+' -u $USER -q ' + 
+                        QUEUE + ' '+rootfolder + '/' +scriptName, TESTING == 0)
+
+    elif args.parstage == '7' :
+      print "preparing for NNLO reweighting"
+      runhnnlo(args.folderName, njobs, QUEUE)
+
+    elif args.parstage == '9' :
+        # overwriting with original
+        scriptName = './run_tar_'+args.folderName+'.sh'
+
+        os.system('rm -rf '+scriptName)
+
+        createTarBall(args.parstage, args.folderName, args.prcName,
+                      args.keepTop, args.rndSeed, scriptName)
+
+        os.system('cd '+rootfolder+';bash '+scriptName)
+
     else                    :
         runEvents(args.parstage, args.folderName,
-                  args.eosFolder + '/' + EOSfolder, njobs, powInputName, jobtag)
+                  args.eosFolder + '/' + EOSfolder, njobs, powInputName,
+                  jobtag, args.prcName)
